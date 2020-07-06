@@ -1,75 +1,243 @@
 <!doctype html>
 <html>
+
 <head>
-    <title>Tennessee COVID-19 Stats</title>
+    <title>Multi-State COVID-19 Stats</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.3/Chart.bundle.min.js"></script>
+    <script src="./color-scheme.min.js"></script>
     <style>
-        * { font-family: Helvetica, Arial, sans-serif; }
+        * {
+            font-family: Helvetica, Arial, sans-serif;
+        }
+
+        label {
+            width: 2rem;
+            display: inline-block;
+        }
+
+        #container {
+            display: flex;
+            height: 100vh;
+        }
+
+        #chart {
+            flex-basis: 70%;
+            height: 100vh;
+        }
+
+        #all-filters {
+            border-bottom: 1px solid #eee;
+            margin-bottom: 0.5rem;
+        }
+
+        #filters {
+            width: 30%;
+            font-size: 1rem;
+        }
+
+        #filters textarea {
+            font-size: 1rem;
+        }
+        #states .field {
+            display: inline-block;
+        }
+
+        #filters label {
+            margin-bottom: 0.5rem;
+        }
+
+        #variables span {
+            padding: 0.2rem;
+            font-size: 0.5rem;
+            display: inline-block;
+        }
+        #footer {
+            margin-top: 3rem;
+        }
+        textarea { width: 95%; }
     </style>
 </head>
+
 <body>
-    <h1>Tennessee COVID-19 Stats</h1>
-    <canvas id="myChart" width="400" height="150"></canvas>
+    <div id="container">
+        <div id="filters">
+            <h3>States</h3>
+            <div id="states"><div class="field"><input type="checkbox" onchange="allStates(this);"><label>All</label></div></div>
+            <h3>Variables</h3>
+            <div id="variables"></div>
+            <h3>Formula</h3>
+            <p>`p` is current point, `prev` is previous point</p>
+            <textarea id="formula">return [p.positive, p.total]</textarea>
+            <button id="chartIt" onclick="chartIt()">Redraw</button>
+        </div>
+        <div id="chart">
+            <h1>Multi-State COVID-19 Stats</h1>
+            <canvas id="myChart" width="600" height="400"></canvas>
+        </div>
+    </div>
+    <center id="footer">
+        Created by <a href="https://github.com/dannybtran">Danny Tran</a>.<br/> Data from the <a href="https://covidtracking.com/">Covid Tracking Project API</a></br>
+    </center>
     <script>
-    var ctx = document.getElementById('myChart').getContext('2d');
-    var options = {
-    };
-    var r = new XMLHttpRequest();
-    r.open("GET", "https://covidtracking.com/api/states/daily", true)
-    r.onreadystatechange = function() {
-        if (r.readyState === 4 && r.status === 200) {
-            var json = JSON.parse(r.responseText);
-            var tn = json.filter(function(e) { return e.state === "TN" }).sort(function(a,b) {
-                return a.date - b.date;
+        var _chart;
+        window.dates = {};
+        var points;
+        var scheme = new ColorScheme;
+        scheme.from_hue(21)
+            .scheme('tetrade')
+            .variation('pastel');
+        var colors = scheme.colors();
+        var ctx = document.getElementById('myChart').getContext('2d');
+        var options = {
+            maintainAspectRation: false,
+            responsive: true,
+        };
+        var states = {};
+        window.apiData = null;
+        var tlabel = {
+            "pos": "positive",
+            "neg": "negative",
+            "deaths": "death",
+            "total": "total",
+            "pos%": "pos_per",
+            "pos_rate": "pos_rate",
+            "pos_delta": "pos_delta",
+        };
+
+        function filter(e) {
+            var $t = e.currentTarget
+            var state = $t.dataset.state;
+            states[state] = $t.checked
+            draw();
+        };
+
+        function allStates(e) {
+            var $states = document.getElementsByClassName('state')
+            Array.from($states).forEach($s => {
+                $s.checked = e.checked
+                filter({currentTarget: $s})
+            })
+            draw()
+        }
+
+        function drawStates(points_by_state) {
+            var ss = Object.keys(points_by_state)
+            ss.sort()
+            var $states = document.getElementById('states')
+            var $variables = document.getElementById('variables')
+            var vv = {}
+            ss.forEach(s => {
+                var $div = document.createElement('div')
+                $div.classList.add('field')
+                var $label = document.createElement('label')
+                $label.innerText = s
+                var $input = document.createElement('input')
+                $input.classList.add('state')
+                $input.type = 'checkbox'
+                $input.dataset.state = s
+                $input.onchange = filter
+                $div.appendChild($input)
+                $div.appendChild($label)
+                $states.appendChild($div)
+                vv = Object.assign({}, vv, points_by_state[s][0])
+            })
+            vv = Object.keys(vv).sort()
+            vv.forEach(v => {
+                var $span = document.createElement('span')
+                $span.innerText = v
+                $variables.appendChild($span)
+            })
+        }
+
+        function chartIt() {
+            draw()
+        }
+
+        function draw() {
+            if (_chart) {
+                _chart.destroy();
+            }
+            var _dates = Object.keys(window.dates).sort();
+            var datasets = [];
+            var i = 0;
+            Object.entries(states).forEach(function(e) {
+                if (!e[1]) return;
+                var scode = e[0];
+                var dpoints = [];
+                var prev = []
+                var lines;
+                _dates.forEach(function(date) {
+                    var p = points.filter(function(e) {
+                        return e.state == scode && e.date == date
+                    })[0];
+                    var $formula = document.getElementById('formula')
+                    var f = $formula.value
+                    var func = new Function('p', 'prev', f)
+                    var results = func(p || {}, prev) || 0
+                    if (Array.isArray(results)) {
+                        results.forEach((r, i) => {
+                            dpoints[i] = dpoints[i] || []
+                            dpoints[i].push(r)
+                        })
+                        lines = Math.max(lines || 0, results.length)
+                    } else {
+                        dpoints[0] = dpoints[0] || []
+                        dpoints[0].push(results)
+                        lines = Math.max(lines || 0, 1)
+                    }
+                    prev.unshift(p)
+                });
+                for(var k = 0; k < lines; k++) {
+                    datasets.push({
+                        label: scode + ':' + k,
+                        fill: false,
+                        borderColor: '#' + colors[i % 16],
+                        data: dpoints[k],
+                    })
+                    i++;
+                }
             });
+
             var data = {
                 type: 'line',
+                fillOpacity: 0.3,
                 data: {
-                    datasets: [
-                        {
-                            label: 'deaths',
-                            backgroundColor: 'red',
-                            data: tn.map(function(i) {
-                                return i.deaths;
-                            })
-                        },
-                        {
-                            label: 'pos',
-                            backgroundColor: 'orange',
-                            data: tn.map(function(i) {
-                                return i.positive;
-                            })
-                        },
-                        {
-                            label: 'neg',
-                            backgroundColor: 'green',
-                            data: tn.map(function(i) {
-                                return i.negative;
-                            })
-                        },
-                        {
-                            label: 'total',
-                            backgroundColor: 'gray',
-                            data: tn.map(function(i) {
-                                return i.total;
-                            })
-                        }
-                    ],
-                    labels: tn.map(function(i) {
-                        var date = i.date + '';
-                        return date.substring(4,6) + '-' + date.substring(6,8)}),
+                    datasets: datasets,
+                    labels: _dates.map(function(s) {
+                        return s.substring(4, 6) + '-' + s.substring(6, 8);
+                    }),
                 },
                 options: options,
             };
-            new Chart(ctx, data);
+            _chart = new Chart(ctx, data);
         }
-    };
-    r.send();
+
+        var r = new XMLHttpRequest();
+        r.open("GET", "https://covidtracking.com/api/states/daily", true)
+        r.onreadystatechange = function() {
+            if (r.readyState === 4 && r.status === 200) {
+                var _points_by_state = {};
+                window.apiData = JSON.parse(r.responseText);
+                points = window.apiData.sort(function(a, b) {
+                    window.dates[a.date] = true;
+                    window.dates[b.date] = true;
+                    if ([undefined, null, NaN].includes(a.percentage)) {
+                        a.pos_per = a.positive / a.total;
+                    }
+                    return a.date - b.date;
+                });
+                points.forEach(function(p) {
+                    _points_by_state[p.state] = _points_by_state[p.state] || [];
+                    var last_point = _points_by_state[p.state][_points_by_state[p.state].length - 1];
+                    p.pos_rate = last_point ? p.positive / last_point.positive : 0;
+                    p.pos_delta = last_point ? p.positive - last_point.positive : 0;
+                    _points_by_state[p.state].push(p);
+                });
+                drawStates(_points_by_state);
+            }
+        };
+        r.send();
     </script>
-    <br/>
-    <center>
-        Created by <a href="https://github.com/dannybtran">Danny Tran</a>.<br/>
-        Data from the <a href="https://covidtracking.com/">Covid Tracking Project API</a></br>
-    </center>
 </body>
+
 </html>
