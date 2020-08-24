@@ -213,7 +213,7 @@
         }
 
         var r = new XMLHttpRequest();
-        r.open("GET", "https://covidtracking.com/api/states/daily", true)
+        r.open("GET", "https://api.covidtracking.com/api/states/daily", true)
         r.onreadystatechange = function() {
             if (r.readyState === 4 && r.status === 200) {
                 var _points_by_state = {};
